@@ -1,0 +1,4 @@
+run_*
+separate_datasets_data/
+*.csv
+*.npy
