@@ -4,14 +4,27 @@ import numpy as np
 from numpy import genfromtxt
 from numpy import linalg as LA
 import warnings
-warnings.filterwarnings('ignore')
+warnings.filterwarnings('ignore') 
 from collections import defaultdict
 from tqdm import tqdm_notebook
 import matplotlib.pyplot as plt
 from sklearn.base import BaseEstimator
+from sklearn.neighbors import KNeighborsRegressor, NearestNeighbors
 from sklearn.model_selection import KFold
+from copy import copy
 
-def create_clustering_pivot_table(results_list, methods_names, datasets_names, manifold='', noise_threshold=0.3):
+def get_neigh_perc(data, perc=95):
+    perc_list = []
+    for n_neighbors in np.arange(3, 30, 1):
+        nn = NearestNeighbors(n_neighbors=n_neighbors)
+        nn.fit(data)
+        neigborhood_X_dist, neigborhood_X_ind = nn.kneighbors(data, n_neighbors=n_neighbors)
+        mean_neigh_distances = neigborhood_X_dist.mean(1)
+        perc_list.append(np.percentile(mean_neigh_distances, perc))
+    return perc_list
+
+def create_clustering_pivot_table(results_list, methods_names, datasets_names, manifold='', noise_threshold=0.3, independent=True,
+                                  not_indep_db_thresh=.8, not_indep_silh_thresh=0.6):
     all_results = dict(zip(methods_names, results_list))
     X_dbind =np.zeros((len(methods_names), len(datasets_names)))
     X_silh =np.zeros((len(methods_names), len(datasets_names)))
@@ -26,16 +39,24 @@ def create_clustering_pivot_table(results_list, methods_names, datasets_names, m
                 label += '_' + manifold
             results_dict = method_results_dict[label]
             if len(results_dict) == 0:
+                # no estimation
                 n_dbind = 1
                 n_silh = 1
             else:
                 # filtering noise samples
                 results_dict = {k:v for k,v in results_dict.items() if v[-1] < noise_threshold}
-                if len(results_dict) > 0:
-                    n_dbind = sorted(results_dict, key=lambda x: results_dict[x][0])[0] # minimized
-                    n_silh = sorted(results_dict, key=lambda x: results_dict[x][1])[-1] # maximized
+                if len(results_dict) > 0: # n_c: [db, sil, noise]
+                    if independent:
+                        n_dbind = sorted(results_dict, key=lambda x: results_dict[x][0])[0] # minimized
+                        n_silh = sorted(results_dict, key=lambda x: results_dict[x][1])[-1] # maximized
+                    else:
+                        n_dbind, n_silh = 1,1
+                        for k,v in results_dict.items():
+                            if v[0] < not_indep_db_thresh and v[1] > not_indep_silh_thresh:
+                                n_dbind,n_silh = k,k
                 else:
                     print(f'{method_name} couldnt estimate N clusters for {label} given threshold: {noise_threshold}')
+                    # too much noize
                     n_dbind = np.nan
                     n_silh = np.nan
             
@@ -46,25 +67,32 @@ def create_clustering_pivot_table(results_list, methods_names, datasets_names, m
     return X_dbind, X_silh
 
 
-def clustering(paths, method_class, param_range):
+def clustering(datasets_dict, method_class, param_range, dbscan=False):
     # performing clustering
+    cluster_metrics = defaultdict(dict)
     cluster_results = defaultdict(dict)
-    for path in tqdm_notebook(paths):
-        dataset = np.genfromtxt(path, delimiter=';')
-        label = path.split("/")[-1].split(".")[0]
+
+    for label, dataset in tqdm_notebook(datasets_dict.items()):
+        
+        if dbscan:
+            print(f'Using external params: {LABEL2DBSCAN_PARAMS[label]}')
+            min_eps, max_eps = LABEL2DBSCAN_PARAMS[label]
+            param_range = np.linspace(min_eps*0.5, max_eps*1.5, len(param_range))
+        
         for p in param_range:
             method = method_class(p)
             pred = method.fit_predict(dataset)
-            if max(pred) > 0: # at least 2 clusters
+            if max(pred) > 0: # at least 2 clusters: [0,1]
                 centers = cl_centers(dataset, pred)
                 ind = davies_bouldin_score(dataset, pred)
                 silh = silhouette_score(dataset, pred)
                 n = len(np.unique(pred[pred != -1]))
                 noise_ratio = sum(pred == -1)/len(pred)
-                cluster_results[label][n] = [ind, silh, noise_ratio]
+                cluster_metrics[label][n] = [ind, silh, noise_ratio]
+                cluster_results[label][n] = pred
             else:
                 print(f'Only one cluster was found for {label}, method: {method.__class__.__name__} param: {p}')
-    return cluster_results
+    return cluster_metrics, cluster_results
 
 
 def plot_proj_clustering(clustering_results, method='', suptitle=None):
