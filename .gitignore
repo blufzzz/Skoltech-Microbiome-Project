@@ -3,3 +3,6 @@ separate_datasets_data/
 *.csv
 *.npy
 images
+.ipynb_checkpoints
+__pycache__
+
