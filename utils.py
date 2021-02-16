@@ -10,6 +10,7 @@ from tqdm import tqdm_notebook
 import matplotlib.pyplot as plt
 from sklearn.base import BaseEstimator
 from sklearn.neighbors import KNeighborsRegressor, NearestNeighbors
+from sklearn.metrics import silhouette_score, davies_bouldin_score, pairwise_distances
 from sklearn.model_selection import KFold
 from copy import copy
 
@@ -67,7 +68,8 @@ def create_clustering_pivot_table(results_list, methods_names, datasets_names, m
     return X_dbind, X_silh
 
 
-def clustering(datasets_dict, method_class, param_range, dbscan=False):
+
+def clustering(datasets_dict, method_class, param_range, dbscan=False, dbscan_params_dict=None):
     # performing clustering
     cluster_metrics = defaultdict(dict)
     cluster_results = defaultdict(dict)
@@ -75,8 +77,7 @@ def clustering(datasets_dict, method_class, param_range, dbscan=False):
     for label, dataset in tqdm_notebook(datasets_dict.items()):
         
         if dbscan:
-            print(f'Using external params: {LABEL2DBSCAN_PARAMS[label]}')
-            min_eps, max_eps = LABEL2DBSCAN_PARAMS[label]
+            min_eps, max_eps = dbscan_params_dict[label]
             param_range = np.linspace(min_eps*0.5, max_eps*1.5, len(param_range))
         
         for p in param_range:
@@ -91,16 +92,30 @@ def clustering(datasets_dict, method_class, param_range, dbscan=False):
                 cluster_metrics[label][n] = [ind, silh, noise_ratio]
                 cluster_results[label][n] = pred
             else:
-                print(f'Only one cluster was found for {label}, method: {method.__class__.__name__} param: {p}')
+                pass
+#                 print(f'Only one cluster was found for {label}, method: {method.__class__.__name__} param: {p}')
     return cluster_metrics, cluster_results
 
 
 def plot_proj_clustering(clustering_results, method='', suptitle=None):
     results = copy(clustering_results)
-    fig, axes = plt.subplots(nrows=4, ncols=3, figsize=(20,15))
-    for i,dataset_name in enumerate(['ptb', 'AGP', 't2d', 'ibd']):
+    L = len(clustering_results)
+    if L == 3:
+        # MERGED
+        MERGED = True
+        fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(15,5))
+        axes = [axes]
+        datasets_iterator = enumerate([None])
+    elif L == 12:
+        # NOT MERGED
+        MERGED = False
+        fig, axes = plt.subplots(nrows=4, ncols=3, figsize=(20,15))
+        datasets_iterator = enumerate(['ptb', 'AGP', 't2d', 'ibd'])
+    else:
+        raise RuntimeError()
+    for i,dataset_name in datasets_iterator:
         for j,tax_name in enumerate(['o', 'f', 'g']):
-            label = f'{dataset_name}_proj_{tax_name}'
+            label = f'proj_{tax_name}' if MERGED else f'{dataset_name}_proj_{tax_name}'
             
             if len(method) > 0:
                 label += '_' + method
@@ -245,3 +260,14 @@ def project(data, plot=False):
     if plot:
         print('EV_NUM',ev_num,"REC_ERROR:",np.abs(pca_proj.inverse_transform(data_projected) - data_centered).mean())
     return data_projected, pca_proj
+
+
+def NPR(X, Z, k=21):
+    _, neigborhood_X = NearestNeighbors(n_neighbors=k).fit(X).kneighbors(X)
+    _, neigborhood_Z = NearestNeighbors(n_neighbors=k).fit(Z).kneighbors(Z)
+    n = X.shape[0]
+    npr = 0
+    for i in range(n):
+        npr += np.intersect1d(neigborhood_X[i], neigborhood_Z[i]).shape[0]
+    npr_normed = npr / (k * n)
+    return npr_normed

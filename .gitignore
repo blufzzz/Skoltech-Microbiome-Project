@@ -1,5 +1,7 @@
 run_*
 separate_datasets_data/
+separate_datasets_transformed/
+datasets/
 *.csv
 *.npy
 images
