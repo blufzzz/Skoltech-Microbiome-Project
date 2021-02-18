@@ -5,6 +5,5 @@ datasets/
 *.csv
 *.npy
 images
-.ipynb_checkpoints
-__pycache__
-
+.ipynb_checkpoints/
+./__pycache__/*

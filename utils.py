@@ -5,7 +5,7 @@ from numpy import genfromtxt
 from numpy import linalg as LA
 import warnings
 warnings.filterwarnings('ignore') 
-from collections import defaultdict
+from collections import defaultdict, Counter
 from tqdm import tqdm_notebook
 import matplotlib.pyplot as plt
 from sklearn.base import BaseEstimator
@@ -13,6 +13,52 @@ from sklearn.neighbors import KNeighborsRegressor, NearestNeighbors
 from sklearn.metrics import silhouette_score, davies_bouldin_score, pairwise_distances
 from sklearn.model_selection import KFold
 from copy import copy
+
+def unpack_data(paths):
+    datasets = {}
+    for path in paths:
+        label = path.split('/')[-1].split('.')[0].split('_')[:3]
+        label = '_'.join(label)
+        try:
+            datasets[label] = np.genfromtxt(path, delimiter=';')
+        except:
+            datasets[label] = np.load(path, allow_pickle=True)
+    return datasets
+
+def get_report(methods_dict, 
+               cluster_results_list, 
+               cluster_preds_list,
+               silh_thresh=0.8, 
+               dbind_thresh=1.5, 
+               noise_thresh=0.3,
+               H_thresh=0.3,
+               n_clusters_max=5,
+               data_default_metrics_max_silhoette=None):
+    
+    report_results = defaultdict(dict)
+    for index, method_name in enumerate(methods_dict.keys()):
+        print('------------------------------')
+        print(method_name)
+        for dataset_label, dataset_results in cluster_results_list[index].items():
+            for n_clusters, metrics in dataset_results.items():
+                ind, silh, noise_ratio = metrics
+                preds = cluster_preds_list[index][dataset_label][n_clusters]
+                if data_default_metrics_max_silhoette is not None:
+                    silh_thresh = data_default_metrics_max_silhoette[dataset_label][1]
+                if silh >= silh_thresh and ind <= dbind_thresh and noise_ratio <= noise_thresh:
+                    ratios = np.array(list(Counter(preds).values())) / len(preds)
+                    H = -(ratios*np.log(ratios)).sum()
+                    ratios = ratios.round(3)
+                    if len(ratios) < n_clusters_max and H > H_thresh:
+                        print(f'Ratio for {dataset_label}, for n_clusters={n_clusters}, H={H}, ratios={ratios}, DBind={ind}, Silh={silh}')
+                        
+        print('------------------------------')
+
+def filter_paths(paths, keywords=[]):
+    paths_filtered = []
+    for word in keywords:
+        paths_filtered += list(filter(lambda x: word in x.split("/")[-1].split(".")[0].split('_'), paths))
+    return paths_filtered
 
 def get_neigh_perc(data, perc=95):
     perc_list = []
@@ -97,48 +143,33 @@ def clustering(datasets_dict, method_class, param_range, dbscan=False, dbscan_pa
     return cluster_metrics, cluster_results
 
 
-def plot_proj_clustering(clustering_results, method='', suptitle=None):
+def plot_proj_clustering(clustering_results, method='', suptitle=None, data_default_metrics=None):
+    '''
+    clustering_results - dict
+    '''
     results = copy(clustering_results)
     L = len(clustering_results)
-    if L == 3:
-        # MERGED
-        MERGED = True
-        fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(15,5))
-        axes = [axes]
-        datasets_iterator = enumerate([None])
-    elif L == 12:
-        # NOT MERGED
-        MERGED = False
-        fig, axes = plt.subplots(nrows=4, ncols=3, figsize=(20,15))
-        datasets_iterator = enumerate(['ptb', 'AGP', 't2d', 'ibd'])
-    else:
-        raise RuntimeError()
-    for i,dataset_name in datasets_iterator:
-        for j,tax_name in enumerate(['o', 'f', 'g']):
-            label = f'proj_{tax_name}' if MERGED else f'{dataset_name}_proj_{tax_name}'
-            
-            if len(method) > 0:
-                label += '_' + method
-            
-            names = results.keys() # clustering_results = {}
-            
-            if label in names:
-                data = results[label]
-                if len(data) > 0:
-                    df = pd.DataFrame(data=data).T
-                    df.columns = ['Davies-Bouldin index', 'silhouette_score', 'noise_ratio']
-                    df.sort_index(ascending=False, inplace=True)
-                    if df['noise_ratio'].sum() == 0.:
-                        df.drop('noise_ratio', axis=1, inplace=True)
-                    ax = axes[i,j]
-                    ax.set_xlabel('# estimated clusters')
-                    ax.set_title(label)
-                    df.plot.bar(ax=ax)
     
-    plt.tight_layout()
-    if suptitle is not None:
-        fig.suptitle(suptitle, fontsize=16, color='blue')
-    plt.show()
+    for label,data in results.items():
+        if len(data) > 0:
+            plt.figure()
+            df = pd.DataFrame(data=data).T
+            df.columns = ['Davies-Bouldin index', 'silhouette_score', 'noise_ratio']
+            df.sort_index(ascending=False, inplace=True)
+            if df['noise_ratio'].sum() == 0.:
+                df.drop('noise_ratio', axis=1, inplace=True)
+            plt.xlabel('# estimated clusters')
+            label = label + '_' + method if len(method) > 0 else label
+            plt.title(suptitle + '_' + label if suptitle is not None else label)
+            df.plot.bar(ax=plt.gca())
+
+            if data_default_metrics is not None:
+                def_clust_type, Silhoette_default = data_default_metrics[label]
+    #                         if not DB_default > 1.5*max(df['Davies-Bouldin index']):
+    #                             ax.hlines(DB_default, 0, len(df.index), linestyles='dotted', colors='blue')
+                ax.hlines(Silhoette_default, 0, len(df.index), linestyles='dotted', colors='orange', label=def_clust_type)
+                ax.legend()
+            plt.show()
 
 # sample the data via binomial mask
 def sample_data(data, fraction):
