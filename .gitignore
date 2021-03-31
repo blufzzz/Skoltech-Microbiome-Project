@@ -4,6 +4,8 @@ separate_datasets_transformed/
 datasets/
 *.csv
 *.npy
+*.png
+*.jpg
 images
 .ipynb_checkpoints/
-./__pycache__/*
+__pycache__/

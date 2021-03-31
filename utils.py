@@ -14,6 +14,9 @@ from sklearn.metrics import silhouette_score, davies_bouldin_score, pairwise_dis
 from sklearn.model_selection import KFold
 from copy import copy
 
+def mae_score(y_pred, y):
+    return (np.linalg.norm(y_pred - y, axis=1, ord=1)/ (np.linalg.norm(y, axis=1, ord=1) + 1e-10)).mean()
+
 def unpack_data(paths):
     datasets = {}
     for path in paths:
@@ -57,7 +60,7 @@ def get_report(methods_dict,
 def filter_paths(paths, keywords=[]):
     paths_filtered = []
     for word in keywords:
-        paths_filtered += list(filter(lambda x: word in x.split("/")[-1].split(".")[0].split('_'), paths))
+        paths_filtered += list(filter(lambda x: word in x.split("/")[-1].split(".")[0], paths))
     return paths_filtered
 
 def get_neigh_perc(data, perc=95):
@@ -66,7 +69,7 @@ def get_neigh_perc(data, perc=95):
         nn = NearestNeighbors(n_neighbors=n_neighbors)
         nn.fit(data)
         neigborhood_X_dist, neigborhood_X_ind = nn.kneighbors(data, n_neighbors=n_neighbors)
-        mean_neigh_distances = neigborhood_X_dist.mean(1)
+        mean_neigh_distances = neigborhood_X_dist[:,1:].mean(1)
         perc_list.append(np.percentile(mean_neigh_distances, perc))
     return perc_list
 
